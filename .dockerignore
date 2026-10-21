@@ -1,0 +1,10 @@
+node_modules
+.env
+.env*
+.git
+.gitignore
+README.md
+test_simulation.js
+supabase/
+supabase_schema.sql
+*.log

@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  sendflow-webhook:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: contagem-leads-sendflow
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+      - SUPABASE_TABLE=${SUPABASE_TABLE:-leads_grupos}
+      - SENDTOK=${SENDTOK}
