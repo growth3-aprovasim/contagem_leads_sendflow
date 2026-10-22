@@ -1,5 +1,5 @@
-# Imagem base leve e oficial do Node.js
-FROM node:20-alpine
+# Imagem base leve e oficial do Node.js 22 LTS (com suporte nativo a WebSocket)
+FROM node:22-alpine
 
 # Cria diretório da aplicação
 WORKDIR /app
