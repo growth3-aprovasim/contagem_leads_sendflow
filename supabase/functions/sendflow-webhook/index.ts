@@ -11,6 +11,15 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS"
 };
 
+function getBrasiliaTimestamp(data: any) {
+  if (data.createdAt_with_timezone_br) {
+    return String(data.createdAt_with_timezone_br).replace(/[-+]\d{2}:\d{2}$/, "");
+  }
+  const baseDate = data.createdAt ? new Date(data.createdAt) : new Date();
+  const brTime = new Date(baseDate.getTime() - 3 * 60 * 60 * 1000);
+  return brTime.toISOString().replace("Z", "");
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -60,7 +69,7 @@ serve(async (req) => {
         nome_grupo: data.groupName || null,
         ent_sai: entSai,
         numero_lead: cleanNumber,
-        timestamp: data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString()
+        timestamp: getBrasiliaTimestamp(data)
       };
     });
 
