@@ -56,7 +56,7 @@ function normalizePayload(payload) {
 }
 
 /**
- * Salva os dados na tabela leads_grupos do Supabase
+ * Salva os dados na tabela mestre (leads_grupos) e na tabela de eventos (leads_grupos_eventos)
  */
 export async function saveSendflowEvent(rawBody) {
   const supabase = getSupabaseClient();
@@ -66,30 +66,71 @@ export async function saveSendflowEvent(rawBody) {
   
   const recordsToInsert = rawList.map(item => normalizePayload(item));
 
-  const { data, error } = await supabase
-    .from(config.supabaseTable)
-    .insert(recordsToInsert)
+  // 1. Upsert na tabela mestre de leads únicos (leads_grupos)
+  const leadsToUpsert = recordsToInsert
+    .filter(r => r.numero_lead)
+    .map(r => ({
+      numero_lead: r.numero_lead,
+      primeiro_registro_em: r.timestamp,
+      ultimo_registro_em: r.timestamp,
+      ultimo_status: r.ent_sai,
+      ultimo_grupo: r.nome_grupo,
+      ultima_campanha: r.nome_campanha,
+      updated_at: new Date().toISOString()
+    }));
+
+  const leadMap = new Map();
+  if (leadsToUpsert.length > 0) {
+    const { data: upsertedLeads, error: upsertErr } = await supabase
+      .from(config.supabaseTableLeads)
+      .upsert(leadsToUpsert, { onConflict: 'numero_lead' })
+      .select('id, numero_lead');
+
+    if (upsertErr) {
+      console.error('[DATABASE] ❌ Erro no upsert de leads mestre:', upsertErr);
+      throw upsertErr;
+    }
+
+    for (const lead of upsertedLeads || []) {
+      leadMap.set(lead.numero_lead, lead.id);
+    }
+  }
+
+  // 2. Insere o registro de histórico de eventos (leads_grupos_eventos)
+  const eventsToInsert = recordsToInsert.map(r => ({
+    lead_id: r.numero_lead ? (leadMap.get(r.numero_lead) || null) : null,
+    nome_campanha: r.nome_campanha,
+    id_campanha: r.id_campanha,
+    nome_grupo: r.nome_grupo,
+    ent_sai: r.ent_sai,
+    numero_lead: r.numero_lead,
+    timestamp: r.timestamp
+  }));
+
+  const { data: insertedEvents, error: eventsErr } = await supabase
+    .from(config.supabaseTableEvents)
+    .insert(eventsToInsert)
     .select();
 
-  if (error) {
-    console.error('[DATABASE] ❌ Erro ao inserir no Supabase:', error);
-    throw error;
+  if (eventsErr) {
+    console.error('[DATABASE] ❌ Erro ao inserir eventos:', eventsErr);
+    throw eventsErr;
   }
 
   return {
-    insertedCount: recordsToInsert.length,
-    records: data
+    insertedCount: insertedEvents.length,
+    records: insertedEvents
   };
 }
 
 /**
- * Consulta rápida de estatísticas na tabela leads_grupos
+ * Consulta rápida de estatísticas na tabela de eventos
  */
 export async function getLeadStats() {
   const supabase = getSupabaseClient();
 
   const { data, error } = await supabase
-    .from(config.supabaseTable)
+    .from(config.supabaseTableEvents)
     .select('nome_campanha, nome_grupo, ent_sai, numero_lead, timestamp')
     .order('timestamp', { ascending: false })
     .limit(100);
@@ -100,3 +141,4 @@ export async function getLeadStats() {
 
   return data;
 }
+

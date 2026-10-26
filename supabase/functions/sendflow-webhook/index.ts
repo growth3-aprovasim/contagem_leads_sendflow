@@ -77,17 +77,59 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { error } = await supabase.from("leads_grupos").insert(records);
+    // 1. Upsert na tabela mestre de leads únicos (leads_grupos)
+    const leadsToUpsert = records
+      .filter((r: any) => r.numero_lead)
+      .map((r: any) => ({
+        numero_lead: r.numero_lead,
+        primeiro_registro_em: r.timestamp,
+        ultimo_registro_em: r.timestamp,
+        ultimo_status: r.ent_sai,
+        ultimo_grupo: r.nome_grupo,
+        ultima_campanha: r.nome_campanha,
+        updated_at: new Date().toISOString()
+      }));
 
-    if (error) {
-      throw error;
+    const leadMap = new Map();
+    if (leadsToUpsert.length > 0) {
+      const { data: upsertedLeads, error: upsertErr } = await supabase
+        .from("leads_grupos")
+        .upsert(leadsToUpsert, { onConflict: "numero_lead" })
+        .select("id, numero_lead");
+
+      if (upsertErr) {
+        throw upsertErr;
+      }
+
+      for (const lead of upsertedLeads || []) {
+        leadMap.set(lead.numero_lead, lead.id);
+      }
+    }
+
+    // 2. Insere histórico de eventos (leads_grupos_eventos)
+    const eventsToInsert = records.map((r: any) => ({
+      lead_id: r.numero_lead ? (leadMap.get(r.numero_lead) || null) : null,
+      nome_campanha: r.nome_campanha,
+      id_campanha: r.id_campanha,
+      nome_grupo: r.nome_grupo,
+      ent_sai: r.ent_sai,
+      numero_lead: r.numero_lead,
+      timestamp: r.timestamp
+    }));
+
+    const { error: eventsErr } = await supabase
+      .from("leads_grupos_eventos")
+      .insert(eventsToInsert);
+
+    if (eventsErr) {
+      throw eventsErr;
     }
 
     return new Response(
       JSON.stringify({
         success: true,
-        message: "Dados gravados na tabela leads_grupos com sucesso!",
-        total: records.length
+        message: "Dados gravados na tabela mestre e eventos com sucesso!",
+        total: eventsToInsert.length
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
