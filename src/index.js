@@ -1,7 +1,12 @@
+process.env.TZ = 'America/Sao_Paulo';
+
 import express from 'express';
 import cors from 'cors';
 import { config } from './config.js';
 import webhookRoutes from './routes/webhookRoutes.js';
+import { flushAndStop } from './services/webhookQueue.js';
+import { startDailySyncScheduler } from './services/sendflowSyncService.js';
+import { getBrasiliaDateTimeParts } from './utils/dateTime.js';
 
 const app = express();
 
@@ -31,16 +36,18 @@ app.use((err, req, res, next) => {
 });
 
 // Inicialização do servidor
-app.listen(config.port, () => {
+const server = app.listen(config.port, () => {
   console.log('====================================================');
   console.log('🚀 SERVIDOR SENDHOOK - CONTAGEM LEADS SENDFLOW');
   console.log('====================================================');
   console.log(`📡 Servidor ativo na porta: ${config.port}`);
+  console.log(`🕒 Horário Brasília:    ${getBrasiliaDateTimeParts().fullStr} (TZ=${process.env.TZ})`);
   console.log(`🔗 Webhook URL Local: http://localhost:${config.port}/webhook`);
+  console.log(`🔄 Sync SendFlow:     http://localhost:${config.port}/sync (Status: /sync/status)`);
   console.log(`💚 Healthcheck:        http://localhost:${config.port}/health`);
   console.log(`📊 Estatísticas:       http://localhost:${config.port}/stats`);
   console.log('----------------------------------------------------');
-  
+
   if (!config.supabaseUrl || !config.supabaseKey) {
     console.warn('⚠️  ATENÇÃO: SUPABASE_URL ou SUPABASE_KEY não configuradas no arquivo .env!');
     console.warn('👉 Abra o arquivo .env e preencha as credenciais do seu Supabase.');
@@ -55,4 +62,23 @@ app.listen(config.port, () => {
     console.log('🔓 Proteção SENDTOK desativada (aceitando todas as origens)');
   }
   console.log('====================================================');
+
+  startDailySyncScheduler();
 });
+
+async function gracefulShutdown(signal) {
+  console.log(`\n[SHUTDOWN] Recebido ${signal}. Drenando fila de webhooks antes de encerrar...`);
+  server.close(async () => {
+    try {
+      await flushAndStop();
+      console.log('[SHUTDOWN] Fila drenada com sucesso. Encerrando.');
+      process.exit(0);
+    } catch (err) {
+      console.error('[SHUTDOWN] Erro ao drenar fila:', err);
+      process.exit(1);
+    }
+  });
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
